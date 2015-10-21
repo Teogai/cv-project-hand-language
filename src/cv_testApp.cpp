@@ -147,48 +147,7 @@ void cv_testApp::draw()
 
 	// We're capturing
 	if (mKinect->isCapturing()) {
-
-		// Set up camera for 3D
-		gl::setMatrices(mCamera);
-
-		// Move skeletons down below the rest of the interface
-		/*gl::pushMatrices();
-		gl::scale(Vec2f::one() * 0.5f);
-		gl::translate(0.0f, -0.62f, 0.0f);
-
-		// Iterate through skeletons
-		uint32_t i = 0;
-		for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
-
-			// Set color
-			gl::color(mKinect->getUserColor(i));
-			vector<JointName> jointList;
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
-
-			// Draw bones and joints
-			for (size_t j = 0; j < jointList.size(); j++) {
-
-				// Get positions of each joint in this bone to draw it
-				if (!skeletonIt->empty()){
-					const Bone& bone = skeletonIt->at(jointList[j]);
-					Vec3f position = bone.getPosition();
-					Vec3f destination = skeletonIt->at(bone.getStartJoint()).getPosition();
-
-					// Draw bone
-					gl::drawLine(position, destination);
-
-					// Draw joint
-					gl::drawSphere(position, 0.025f, 16);
-				}
-
-			}
-
-		}
-		*/
-
 		// Switch to 2D
-		//gl::popMatrices();
 		gl::setMatricesWindow(getWindowSize(), true);
 
 		// Draw depth and color textures
@@ -212,6 +171,44 @@ void cv_testApp::draw()
 			break;
 		}
 		
+		// Set up camera for 3D
+		//gl::setMatrices(mCamera);
+
+		// Move skeletons down below the rest of the interface
+		gl::pushMatrices();
+		gl::scale(Vec2f::one() * 2);
+		// Iterate through skeletons
+		uint32_t i = 0;
+		for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
+
+			// Set color
+			gl::color(1, 0, 0);
+			//gl::color(mKinect->getUserColor(i));
+			vector<JointName> jointList;
+			jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
+			jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
+
+			// Draw bones and joints
+			for (size_t j = 0; j < jointList.size(); j++) {
+
+				// Get positions of each joint in this bone to draw it
+				if (!skeletonIt->empty()){
+					const Bone& bone = skeletonIt->at(jointList[j]);
+					Vec2f position = mKinect->getSkeletonDepthPos(bone.getPosition());
+					Vec2f destination = mKinect->getSkeletonDepthPos(skeletonIt->at(bone.getStartJoint()).getPosition());
+
+					// Draw bone
+					gl::drawLine(position, destination);
+
+					// Draw joint
+					gl::drawSolidCircle(position, 2, 16);
+				}
+
+			}
+
+		}
+		gl::color(1, 1, 1);
+		gl::popMatrices();
 	}
 
 	// Draw the interface
@@ -488,35 +485,11 @@ void cv_testApp::update()
 
 	// get hands from depth surface
 	// get Maximum and Minimum depth
-	cv::Mat img_depth = toOcv(mDepthSurface);
-	double min_intensity, max_intensity;
-	cv::minMaxLoc(img_depth, &min_intensity, &max_intensity);
+	if (mDepthSurface){
+		cv::Mat img_depth = toOcv(mDepthSurface);
 
-	int i, j, k, sum = 0, count = 0;
-
-	for (i = 0; i < 480; i++)
-	{
-		for (j = 0; j < 640; j++)
-		{
-			if (img_depth.at<uchar>(i, j) < 180)
-			{
-				sum += img_depth.at<uchar>(i, j);
-				count++;
-			}
-		}
+		mHandsTexture = gl::Texture(fromOcv(img_depth));
 	}
-
-	int range = 15;
-
-	if (count)
-	{
-		range = 190 - sum / count;
-	}
-
-	cv::Mat img_thresh;
-	cv::threshold(img_depth, img_thresh, min_intensity + range, 255, cv::THRESH_BINARY_INV);
-	cv::medianBlur(img_thresh, img_thresh, 5);
-	mHandsTexture = gl::Texture(fromOcv(img_depth));
 }
 
 void cv_testApp::keyDown(KeyEvent e){
