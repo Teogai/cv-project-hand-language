@@ -33,7 +33,8 @@
 * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *
 */
-
+#define KINECT_WIDTH 640
+#define KINECT_HEIGHT 480
 // Includes
 #include <algorithm>
 #include "boost/algorithm/string.hpp"
@@ -53,6 +54,7 @@
 * and read and represent color, depth, and skeleton data.
 * It's also useful as a device test and control panel.
 */
+
 class cv_testApp : public ci::app::AppBasic
 {
 public:
@@ -61,7 +63,10 @@ public:
 	void								setup();
 	void								shutdown();
 	void								update();
+	void								keyDown(ci::app::KeyEvent e);
 private:
+	
+
 	// Capturing flags
 	bool								mCapture;
 	bool								mCapturePrev;
@@ -82,7 +87,7 @@ private:
 	bool								mFlippedPrev;
 	bool								mInverted;
 	bool								mInvertedPrev;
-	int						mJoint;
+
 	// Kinect
 	ci::Surface8u						mColorSurface;
 	ci::Surface16u						mDepthSurface;
@@ -119,6 +124,9 @@ private:
 
 	// Save screen shot
 	void								screenShot();
+
+	//enum
+	enum mode{DEPTH, VIDEO} displayMode;
 };
 
 // Imports
@@ -141,7 +149,7 @@ void cv_testApp::draw()
 		gl::setMatrices(mCamera);
 
 		// Move skeletons down below the rest of the interface
-		gl::pushMatrices();
+		/*gl::pushMatrices();
 		gl::scale(Vec2f::one() * 0.5f);
 		gl::translate(0.0f, -0.62f, 0.0f);
 
@@ -174,24 +182,31 @@ void cv_testApp::draw()
 			}
 
 		}
+		*/
 
 		// Switch to 2D
-		gl::popMatrices();
+		//gl::popMatrices();
 		gl::setMatricesWindow(getWindowSize(), true);
 
 		// Draw depth and color textures
-		gl::color(Colorf::white());
-		if (mDepthSurface) {
-			Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
-			Rectf destRect(265.0f, 15.0f, 505.0f, 195.0f);
-			gl::draw(gl::Texture(mDepthSurface), srcArea, destRect);
-		}
-		if (mColorSurface) {
-			Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
-			Rectf destRect(508.0f, 15.0f, 748.0f, 195.0f);
-			gl::draw(gl::Texture(mColorSurface), srcArea, destRect);
-		}
+		Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
 
+		switch (displayMode)
+		{
+		case cv_testApp::DEPTH:
+			//Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
+			
+			gl::draw(gl::Texture(mDepthSurface), destRect);
+			break;
+		case cv_testApp::VIDEO:
+			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
+			
+			gl::draw(gl::Texture(mColorSurface), destRect);
+			break;
+		default:
+			break;
+		}
+		
 	}
 
 	// Draw the interface
@@ -219,7 +234,7 @@ void cv_testApp::onSkeletonData(vector<Skeleton> skeletons, const DeviceOptions&
 // Prepare window
 void cv_testApp::prepareSettings(Settings *settings)
 {
-	settings->setWindowSize(1005, 570);
+	settings->setWindowSize(KINECT_WIDTH, KINECT_HEIGHT);
 	settings->setFrameRate(60.0f);
 }
 
@@ -279,7 +294,6 @@ void cv_testApp::setup()
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
 
-	mJoint = 0;
 
 	// Start image capture
 	mKinect = Kinect::create();
@@ -323,7 +337,6 @@ void cv_testApp::setup()
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
 	mParams->addButton("Screen shot", bind(&cv_testApp::screenShot, this), "key=s");
 	mParams->addButton("Quit", bind(&cv_testApp::quit, this), "key=q");
-	mParams->addParam("JointID", &mJoint, "min=0 max=200 step=1 keyIncr=+ keyDecr=-");
 }
 
 // Quit
@@ -468,6 +481,16 @@ void cv_testApp::update()
 
 	}
 }
+
+void cv_testApp::keyDown(KeyEvent e){
+	if (e.getChar() == '1'){
+		displayMode = DEPTH;
+	}
+	else if (e.getChar() == '2'){
+		displayMode = VIDEO;
+	}
+}
+
 
 // Run application
 CINDER_APP_BASIC(cv_testApp, RendererGl)
