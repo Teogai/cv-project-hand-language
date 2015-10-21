@@ -93,6 +93,7 @@ private:
 	// Kinect
 	ci::Surface8u						mColorSurface;
 	ci::Surface16u						mDepthSurface;
+	std::vector<ci::Vec2f>				mHandPos;
 	ci::gl::Texture						mHandsTexture;
 	int32_t								mDeviceCount;
 	KinectSdk::DeviceOptions			mDeviceOptions;
@@ -148,10 +149,12 @@ void cv_testApp::draw()
 	// We're capturing
 	if (mKinect->isCapturing()) {
 		// Switch to 2D
+		gl::pushMatrices();
 		gl::setMatricesWindow(getWindowSize(), true);
-
+		gl::scale(Vec2f::one() * 2);
+		
 		// Draw depth and color textures
-		Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
+		//Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
 
 		switch (displayMode)
 		{
@@ -160,12 +163,12 @@ void cv_testApp::draw()
 			
 			//gl::draw(gl::Texture(mDepthSurface), destRect);
 			if (mHandsTexture)
-			gl::draw(mHandsTexture, destRect);
+				gl::draw(mHandsTexture);
 			break;
 		case cv_testApp::VIDEO:
 			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
 			
-			gl::draw(gl::Texture(mColorSurface), destRect);
+			gl::draw(gl::Texture(mColorSurface));
 			break;
 		default:
 			break;
@@ -175,38 +178,13 @@ void cv_testApp::draw()
 		//gl::setMatrices(mCamera);
 
 		// Move skeletons down below the rest of the interface
-		gl::pushMatrices();
-		gl::scale(Vec2f::one() * 2);
+
+		gl::color(1, 0, 0);
 		// Iterate through skeletons
-		uint32_t i = 0;
-		for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
-
-			// Set color
-			gl::color(1, 0, 0);
-			//gl::color(mKinect->getUserColor(i));
-			vector<JointName> jointList;
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
-
-			// Draw bones and joints
-			for (size_t j = 0; j < jointList.size(); j++) {
-
-				// Get positions of each joint in this bone to draw it
-				if (!skeletonIt->empty()){
-					const Bone& bone = skeletonIt->at(jointList[j]);
-					Vec2f position = mKinect->getSkeletonDepthPos(bone.getPosition());
-					Vec2f destination = mKinect->getSkeletonDepthPos(skeletonIt->at(bone.getStartJoint()).getPosition());
-
-					// Draw bone
-					gl::drawLine(position, destination);
-
-					// Draw joint
-					gl::drawSolidCircle(position, 2, 16);
-				}
-
-			}
-
+		for (size_t i = 0; i < mHandPos.size(); i++){
+			gl::drawSolidCircle(mHandPos[i], 2, 16);
 		}
+		
 		gl::color(1, 1, 1);
 		gl::popMatrices();
 	}
@@ -295,6 +273,7 @@ void cv_testApp::setup()
 	mRemoveBackground = false;
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
+	displayMode = DEPTH;
 
 
 	// Start image capture
@@ -483,11 +462,38 @@ void cv_testApp::update()
 
 	}
 
+	// get Bones position 
+	mHandPos.clear();
+	uint32_t i = 0;
+	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
+		vector<JointName> jointList;
+		jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
+		jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
+
+		// Draw bones and joints
+		for (size_t j = 0; j < jointList.size(); j++) {
+
+			// Get positions of each joint in this bone to draw it
+			if (!skeletonIt->empty()){
+				const Bone& bone = skeletonIt->at(jointList[j]);
+				Vec2f position = mKinect->getSkeletonDepthPos(bone.getPosition());
+
+				// Draw joint
+				mHandPos.push_back(position);
+			}
+
+		}
+	}
 	// get hands from depth surface
-	// get Maximum and Minimum depth
 	if (mDepthSurface){
 		cv::Mat img_depth = toOcv(mDepthSurface);
-
+		//if (!mHandPos.empty()){
+		/*double min_intensity, max_intensity;
+		minMaxLoc(img_depth, &min_intensity, &max_intensity);
+		cv::Mat img_thresh;
+		cv::threshold(img_depth, img_thresh, min_intensity + 180, 255, cv::THRESH_BINARY_INV);
+		cv::medianBlur(img_thresh, img_thresh, 5);*/
+		//}
 		mHandsTexture = gl::Texture(fromOcv(img_depth));
 	}
 }
