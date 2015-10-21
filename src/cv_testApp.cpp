@@ -48,6 +48,8 @@
 #include "cinder/Utilities.h"
 #include "Kinect.h"
 
+#include "CinderOpenCv.h"
+
 /*
 * This application explores the features of the Kinect SDK wrapper. It
 * demonstrates how to start a device, query for devices, adjust tilt,
@@ -91,6 +93,7 @@ private:
 	// Kinect
 	ci::Surface8u						mColorSurface;
 	ci::Surface16u						mDepthSurface;
+	ci::gl::Texture						mHandsTexture;
 	int32_t								mDeviceCount;
 	KinectSdk::DeviceOptions			mDeviceOptions;
 	KinectSdk::KinectRef				mKinect;
@@ -196,7 +199,9 @@ void cv_testApp::draw()
 		case cv_testApp::DEPTH:
 			//Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
 			
-			gl::draw(gl::Texture(mDepthSurface), destRect);
+			//gl::draw(gl::Texture(mDepthSurface), destRect);
+			if (mHandsTexture)
+			gl::draw(mHandsTexture, destRect);
 			break;
 		case cv_testApp::VIDEO:
 			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
@@ -480,6 +485,38 @@ void cv_testApp::update()
 		}
 
 	}
+
+	// get hands from depth surface
+	// get Maximum and Minimum depth
+	cv::Mat img_depth = toOcv(mDepthSurface);
+	double min_intensity, max_intensity;
+	cv::minMaxLoc(img_depth, &min_intensity, &max_intensity);
+
+	int i, j, k, sum = 0, count = 0;
+
+	for (i = 0; i < 480; i++)
+	{
+		for (j = 0; j < 640; j++)
+		{
+			if (img_depth.at<uchar>(i, j) < 180)
+			{
+				sum += img_depth.at<uchar>(i, j);
+				count++;
+			}
+		}
+	}
+
+	int range = 15;
+
+	if (count)
+	{
+		range = 190 - sum / count;
+	}
+
+	cv::Mat img_thresh;
+	cv::threshold(img_depth, img_thresh, min_intensity + range, 255, cv::THRESH_BINARY_INV);
+	cv::medianBlur(img_thresh, img_thresh, 5);
+	mHandsTexture = gl::Texture(fromOcv(img_depth));
 }
 
 void cv_testApp::keyDown(KeyEvent e){
