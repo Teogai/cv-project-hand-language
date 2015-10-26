@@ -33,8 +33,8 @@
 * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *
 */
-#define KINECT_WIDTH 640
-#define KINECT_HEIGHT 480
+#define KINECT_WIDTH 320
+#define KINECT_HEIGHT 240
 // Includes
 #include <algorithm>
 #include "boost/algorithm/string.hpp"
@@ -93,7 +93,8 @@ private:
 	// Kinect
 	ci::Surface8u						mColorSurface;
 	ci::Surface16u						mDepthSurface;
-	std::vector<ci::Vec2f>				mHandPos;
+	std::vector<ci::Vec3f>				mHandPos;
+	std::vector<cv::Mat>				mHandsMat;
 	ci::gl::Texture						mHandsTexture;
 	int32_t								mDeviceCount;
 	KinectSdk::DeviceOptions			mDeviceOptions;
@@ -151,7 +152,7 @@ void cv_testApp::draw()
 		// Switch to 2D
 		gl::pushMatrices();
 		gl::setMatricesWindow(getWindowSize(), true);
-		gl::scale(Vec2f::one() * 2);
+		gl::scale(Vec2f::one() * 3);
 		
 		// Draw depth and color textures
 		//Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
@@ -160,10 +161,16 @@ void cv_testApp::draw()
 		{
 		case cv_testApp::DEPTH:
 			//Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
-			
-			//gl::draw(gl::Texture(mDepthSurface), destRect);
-			if (mHandsTexture)
-				gl::draw(mHandsTexture);
+			if (mDepthSurface)
+				gl::draw(gl::Texture(mDepthSurface));
+			if (!mHandsMat.empty()){
+				for (size_t i = 0; i < mHandsMat.size(); i++){
+					gl::pushMatrices();
+					gl::translate(mHandPos[i].xy() - (Vec2f::one() * (1 / mHandPos[i].z) * 40));
+					gl::draw(gl::Texture(fromOcv(mHandsMat[i])));
+					gl::popMatrices();
+				}
+			}
 			break;
 		case cv_testApp::VIDEO:
 			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
@@ -179,13 +186,13 @@ void cv_testApp::draw()
 
 		// Move skeletons down below the rest of the interface
 
-		gl::color(1, 0, 0);
+		//gl::color(1, 0, 0);
 		// Iterate through skeletons
-		for (size_t i = 0; i < mHandPos.size(); i++){
-			gl::drawSolidCircle(mHandPos[i], 2, 16);
-		}
-		
-		gl::color(1, 1, 1);
+		//for (size_t i = 0; i < mHandPos.size(); i++){
+		//	gl::drawStrokedCircle(mHandPos[i].xy(), (1 / mHandPos[i].z)*40, 16);
+		//}	
+		//gl::color(1, 1, 1);
+
 		gl::popMatrices();
 	}
 
@@ -214,7 +221,7 @@ void cv_testApp::onSkeletonData(vector<Skeleton> skeletons, const DeviceOptions&
 // Prepare window
 void cv_testApp::prepareSettings(Settings *settings)
 {
-	settings->setWindowSize(KINECT_WIDTH, KINECT_HEIGHT);
+	settings->setWindowSize(KINECT_WIDTH * 3, KINECT_HEIGHT * 3);
 	settings->setFrameRate(60.0f);
 }
 
@@ -270,7 +277,7 @@ void cv_testApp::setup()
 	mFullScreen = isFullScreen();
 	mInverted = false;
 	mInvertedPrev = mInverted;
-	mRemoveBackground = false;
+	mRemoveBackground = true;
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
 	displayMode = DEPTH;
@@ -462,40 +469,152 @@ void cv_testApp::update()
 
 	}
 
-	// get Bones position 
+	// get hands position 
 	mHandPos.clear();
-	uint32_t i = 0;
-	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
+	mHandsMat.clear();
+	cv::Mat img_depth;
+	if (mDepthSurface)
+		img_depth = toOcv(Channel8u(mDepthSurface));
+
+	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt) {
 		vector<JointName> jointList;
 		jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
 		jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
 
 		// Draw bones and joints
-		for (size_t j = 0; j < jointList.size(); j++) {
+		for (size_t m = 0; m < jointList.size(); m++) {
 
-			// Get positions of each joint in this bone to draw it
+			// Get positions of each hand in this bone to draw it
 			if (!skeletonIt->empty()){
-				const Bone& bone = skeletonIt->at(jointList[j]);
-				Vec2f position = mKinect->getSkeletonDepthPos(bone.getPosition());
+				const Bone& bone = skeletonIt->at(jointList[m]);
+				Vec2f handPos2d = mKinect->getSkeletonDepthPos(bone.getPosition());
+				float handDepth = bone.getPosition().z;
 
 				// Draw joint
-				mHandPos.push_back(position);
+				Vec3f handPos3d(handPos2d, handDepth);
+				mHandPos.push_back(handPos3d);
+				// get hands from depth surface
+				float radius = (1 / handDepth) * 40;
+				if (mDepthSurface){
+					if (handPos2d.x > radius
+						&& handPos2d.x < 320 - radius
+						&& handPos2d.y > radius
+						&& handPos2d.y < 240 - radius)
+					{
+						// Hand thresholding
+						double hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
+						
+						int rectTopLeftX = handPos2d.x - radius;
+						int rectTopLeftY = handPos2d.y - radius;
+
+						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2, radius * 2);
+						cv::Mat handMat = img_depth(handRect);
+
+						cv::Mat img_thresh, img_canny;
+						cv::threshold(handMat, img_thresh, hand_intensity + 1, 255, CV_THRESH_BINARY_INV);
+						cv::medianBlur(img_thresh, img_thresh, 5);
+
+						// Find contour
+						Canny(img_thresh, img_canny, 60, 110);
+
+						vector< vector<cv::Point> > contours;
+						cv::findContours(img_canny, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+
+						vector< vector<cv::Point> > hull(contours.size());
+						vector< vector<int> > hullI(contours.size());
+
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							cv::convexHull(contours[i], hull[i], false);
+							cv::convexHull(contours[i], hullI[i], false);
+						}
+
+						//draw Contours
+						cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							cv::Scalar color = cv::Scalar(255, 255, 255);
+							cv::drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+						}
+
+						// get hull points of fingertips
+						vector< vector<cv::Point> > fhull, finhull;
+						int fhullIndex = -1;
+						cv::Point p1, p2, hullP;
+						double th1, th2, th;
+
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							if (contours[i].size() < 50)
+							{
+								continue;
+							}
+							fhull.push_back(vector<cv::Point>());
+							finhull.push_back(vector<cv::Point>());
+							fhullIndex++;
+
+							for (size_t j = 0; j < hullI[i].size(); j++)
+							{
+								hullP = contours[i][hullI[i][j]];
+								p1 = contours[i][(hullI[i][j] - 16) % contours[i].size()];
+								p2 = contours[i][(hullI[i][j] + 16) % contours[i].size()];
+
+								th1 = abs(atan2(hullP.y - p1.y, hullP.x - p1.x) * 180 / CV_PI);
+								th2 = abs(atan2(hullP.y - p2.y, hullP.x - p2.x) * 180 / CV_PI);
+								th = abs(th1 - th2);
+								if (th < 40)
+								{
+									finhull[fhullIndex].push_back(hullP);
+								}
+							}
+						}
+
+						// get exact fingertips
+						vector< vector<cv::Point> >nfhull;
+						int chullx, chully, add_flag = 1, nhullindex = -1;
+
+						for (size_t i = 0; i<finhull.size(); i++)
+						{
+							nfhull.push_back(vector<cv::Point>());
+							for (size_t j = 0; j < finhull[i].size(); j++)
+							{
+								chullx = finhull[i][j].x;
+								chully = finhull[i][j].y;
+								add_flag = 1;
+								for (size_t k = 0; k<nfhull[i].size(); k++)
+								{
+									if (nfhull[i][k].x > chullx - 15 && nfhull[i][k].x < chullx + 15
+										&& nfhull[i][k].y > chully - 15 && nfhull[i][k].y < chully + 15)
+									{
+										add_flag = 0;
+										break;
+									}
+								}
+								if (add_flag)
+								{
+									nfhull[i].push_back(cv::Point(chullx, chully));
+								}
+							}
+						}
+
+						// draw hull Points
+						for (size_t i = 0; i<nfhull.size(); i++)
+						{
+							for (size_t j = 0; j<nfhull[i].size(); j++)
+							{
+								cv::circle(drawing, nfhull[i][j], 7, (0, 255, 255), 3, 8);
+							}
+						}
+						mHandsMat.push_back(drawing);
+					}
+
+				}
 			}
 
 		}
 	}
-	// get hands from depth surface
-	if (mDepthSurface){
-		cv::Mat img_depth = toOcv(mDepthSurface);
-		//if (!mHandPos.empty()){
-		/*double min_intensity, max_intensity;
-		minMaxLoc(img_depth, &min_intensity, &max_intensity);
-		cv::Mat img_thresh;
-		cv::threshold(img_depth, img_thresh, min_intensity + 180, 255, cv::THRESH_BINARY_INV);
-		cv::medianBlur(img_thresh, img_thresh, 5);*/
-		//}
-		mHandsTexture = gl::Texture(fromOcv(img_depth));
-	}
+	
 }
 
 void cv_testApp::keyDown(KeyEvent e){
