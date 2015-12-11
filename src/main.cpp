@@ -33,7 +33,8 @@
 * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *
 */
-
+#define KINECT_WIDTH 320
+#define KINECT_HEIGHT 240
 // Includes
 #include <algorithm>
 #include "boost/algorithm/string.hpp"
@@ -47,12 +48,15 @@
 #include "cinder/Utilities.h"
 #include "Kinect.h"
 
+#include "CinderOpenCv.h"
+
 /*
 * This application explores the features of the Kinect SDK wrapper. It
 * demonstrates how to start a device, query for devices, adjust tilt,
 * and read and represent color, depth, and skeleton data.
 * It's also useful as a device test and control panel.
 */
+
 class cv_testApp : public ci::app::AppBasic
 {
 public:
@@ -61,7 +65,10 @@ public:
 	void								setup();
 	void								shutdown();
 	void								update();
+	void								keyDown(ci::app::KeyEvent e);
 private:
+	
+
 	// Capturing flags
 	bool								mCapture;
 	bool								mCapturePrev;
@@ -82,10 +89,13 @@ private:
 	bool								mFlippedPrev;
 	bool								mInverted;
 	bool								mInvertedPrev;
-	int						mJoint;
+
 	// Kinect
 	ci::Surface8u						mColorSurface;
 	ci::Surface16u						mDepthSurface;
+	std::vector<ci::Vec3f>				mHandPos;
+	std::vector<cv::Mat>				mHandsMat;
+	ci::gl::Texture						mHandsTexture;
 	int32_t								mDeviceCount;
 	KinectSdk::DeviceOptions			mDeviceOptions;
 	KinectSdk::KinectRef				mKinect;
@@ -119,6 +129,9 @@ private:
 
 	// Save screen shot
 	void								screenShot();
+
+	//enum
+	enum mode{DEPTH, VIDEO} displayMode;
 };
 
 // Imports
@@ -136,62 +149,51 @@ void cv_testApp::draw()
 
 	// We're capturing
 	if (mKinect->isCapturing()) {
+		// Switch to 2D
+		gl::pushMatrices();
+		gl::setMatricesWindow(getWindowSize(), true);
+		gl::scale(Vec2f::one() * 3);
+		
+		// Draw depth and color textures
+		//Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
 
+		switch (displayMode)
+		{
+		case cv_testApp::DEPTH:
+			//Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
+			if (mDepthSurface)
+				gl::draw(gl::Texture(mDepthSurface));
+			if (!mHandsMat.empty()){
+				for (size_t i = 0; i < mHandsMat.size(); i++){
+					gl::pushMatrices();
+					gl::translate(mHandPos[i].xy() - (Vec2f::one() * (1 / mHandPos[i].z) * 40));
+					gl::draw(gl::Texture(fromOcv(mHandsMat[i])));
+					gl::popMatrices();
+				}
+			}
+			break;
+		case cv_testApp::VIDEO:
+			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
+			
+			gl::draw(gl::Texture(mColorSurface));
+			break;
+		default:
+			break;
+		}
+		
 		// Set up camera for 3D
-		gl::setMatrices(mCamera);
+		//gl::setMatrices(mCamera);
 
 		// Move skeletons down below the rest of the interface
-		gl::pushMatrices();
-		gl::scale(Vec2f::one() * 0.5f);
-		gl::translate(0.0f, -0.62f, 0.0f);
 
+		//gl::color(1, 0, 0);
 		// Iterate through skeletons
-		uint32_t i = 0;
-		for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt, i++) {
+		//for (size_t i = 0; i < mHandPos.size(); i++){
+		//	gl::drawStrokedCircle(mHandPos[i].xy(), (1 / mHandPos[i].z)*40, 16);
+		//}	
+		//gl::color(1, 1, 1);
 
-			// Set color
-			gl::color(mKinect->getUserColor(i));
-			vector<JointName> jointList;
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
-			jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
-
-			// Draw bones and joints
-			for (size_t j = 0; j < jointList.size(); j++) {
-
-				// Get positions of each joint in this bone to draw it
-				if (!skeletonIt->empty()){
-					const Bone& bone = skeletonIt->at(jointList[j]);
-					Vec3f position = bone.getPosition();
-					Vec3f destination = skeletonIt->at(bone.getStartJoint()).getPosition();
-
-					// Draw bone
-					gl::drawLine(position, destination);
-
-					// Draw joint
-					gl::drawSphere(position, 0.025f, 16);
-				}
-
-			}
-
-		}
-
-		// Switch to 2D
 		gl::popMatrices();
-		gl::setMatricesWindow(getWindowSize(), true);
-
-		// Draw depth and color textures
-		gl::color(Colorf::white());
-		if (mDepthSurface) {
-			Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
-			Rectf destRect(265.0f, 15.0f, 505.0f, 195.0f);
-			gl::draw(gl::Texture(mDepthSurface), srcArea, destRect);
-		}
-		if (mColorSurface) {
-			Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
-			Rectf destRect(508.0f, 15.0f, 748.0f, 195.0f);
-			gl::draw(gl::Texture(mColorSurface), srcArea, destRect);
-		}
-
 	}
 
 	// Draw the interface
@@ -219,7 +221,7 @@ void cv_testApp::onSkeletonData(vector<Skeleton> skeletons, const DeviceOptions&
 // Prepare window
 void cv_testApp::prepareSettings(Settings *settings)
 {
-	settings->setWindowSize(1005, 570);
+	settings->setWindowSize(KINECT_WIDTH * 3, KINECT_HEIGHT * 3);
 	settings->setFrameRate(60.0f);
 }
 
@@ -275,11 +277,11 @@ void cv_testApp::setup()
 	mFullScreen = isFullScreen();
 	mInverted = false;
 	mInvertedPrev = mInverted;
-	mRemoveBackground = false;
+	mRemoveBackground = true;
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
+	displayMode = DEPTH;
 
-	mJoint = 0;
 
 	// Start image capture
 	mKinect = Kinect::create();
@@ -323,7 +325,6 @@ void cv_testApp::setup()
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
 	mParams->addButton("Screen shot", bind(&cv_testApp::screenShot, this), "key=s");
 	mParams->addButton("Quit", bind(&cv_testApp::quit, this), "key=q");
-	mParams->addParam("JointID", &mJoint, "min=0 max=200 step=1 keyIncr=+ keyDecr=-");
 }
 
 // Quit
@@ -467,7 +468,164 @@ void cv_testApp::update()
 		}
 
 	}
+
+	// get hands position 
+	mHandPos.clear();
+	mHandsMat.clear();
+	cv::Mat img_depth;
+	if (mDepthSurface)
+		img_depth = toOcv(Channel8u(mDepthSurface));
+
+	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt) {
+		vector<JointName> jointList;
+		jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
+		jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
+
+		// Draw bones and joints
+		for (size_t m = 0; m < jointList.size(); m++) {
+
+			// Get positions of each hand in this bone to draw it
+			if (!skeletonIt->empty()){
+				const Bone& bone = skeletonIt->at(jointList[m]);
+				Vec2f handPos2d = mKinect->getSkeletonDepthPos(bone.getPosition());
+				float handDepth = bone.getPosition().z;
+
+				// Draw joint
+				Vec3f handPos3d(handPos2d, handDepth);
+				mHandPos.push_back(handPos3d);
+				// get hands from depth surface
+				float radius = (1 / handDepth) * 40;
+				if (mDepthSurface){
+					if (handPos2d.x > radius
+						&& handPos2d.x < 320 - radius
+						&& handPos2d.y > radius
+						&& handPos2d.y < 240 - radius)
+					{
+						// Hand thresholding
+						double hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
+						
+						float rectTopLeftX = handPos2d.x - radius;
+						float rectTopLeftY = handPos2d.y - radius;
+
+						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2.0f, radius * 2.0f);
+						cv::Mat handMat = img_depth(handRect);
+
+						cv::Mat img_thresh, img_canny;
+						cv::threshold(handMat, img_thresh, hand_intensity + 1, 255, CV_THRESH_BINARY_INV);
+						cv::medianBlur(img_thresh, img_thresh, 5);
+
+						// Find contour
+						Canny(img_thresh, img_canny, 60, 110);
+
+						vector< vector<cv::Point> > contours;
+						cv::findContours(img_canny, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+
+						vector< vector<cv::Point> > hull(contours.size());
+						vector< vector<int> > hullI(contours.size());
+
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							cv::convexHull(contours[i], hull[i], false);
+							cv::convexHull(contours[i], hullI[i], false);
+						}
+
+						//draw Contours
+						cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							cv::Scalar color = cv::Scalar(255, 255, 255);
+							cv::drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+						}
+
+						// get hull points of fingertips
+						vector< vector<cv::Point> > fhull, finhull;
+						int fhullIndex = -1;
+						cv::Point p1, p2, hullP;
+						double th1, th2, th;
+
+						for (size_t i = 0; i < contours.size(); i++)
+						{
+							if (contours[i].size() < 50)
+							{
+								continue;
+							}
+							fhull.push_back(vector<cv::Point>());
+							finhull.push_back(vector<cv::Point>());
+							fhullIndex++;
+
+							for (size_t j = 0; j < hullI[i].size(); j++)
+							{
+								hullP = contours[i][hullI[i][j]];
+								p1 = contours[i][(hullI[i][j] - 16) % contours[i].size()];
+								p2 = contours[i][(hullI[i][j] + 16) % contours[i].size()];
+
+								th1 = abs(atan2(hullP.y - p1.y, hullP.x - p1.x) * 180 / CV_PI);
+								th2 = abs(atan2(hullP.y - p2.y, hullP.x - p2.x) * 180 / CV_PI);
+								th = abs(th1 - th2);
+								if (th < 40)
+								{
+									finhull[fhullIndex].push_back(hullP);
+								}
+							}
+						}
+
+						// get exact fingertips
+						vector< vector<cv::Point> >nfhull;
+						int chullx, chully, add_flag = 1, nhullindex = -1;
+
+						for (size_t i = 0; i<finhull.size(); i++)
+						{
+							nfhull.push_back(vector<cv::Point>());
+							for (size_t j = 0; j < finhull[i].size(); j++)
+							{
+								chullx = finhull[i][j].x;
+								chully = finhull[i][j].y;
+								add_flag = 1;
+								for (size_t k = 0; k<nfhull[i].size(); k++)
+								{
+									if (nfhull[i][k].x > chullx - 15 && nfhull[i][k].x < chullx + 15
+										&& nfhull[i][k].y > chully - 15 && nfhull[i][k].y < chully + 15)
+									{
+										add_flag = 0;
+										break;
+									}
+								}
+								if (add_flag)
+								{
+									nfhull[i].push_back(cv::Point(chullx, chully));
+								}
+							}
+						}
+
+						// draw hull Points
+						for (size_t i = 0; i<nfhull.size(); i++)
+						{
+							for (size_t j = 0; j<nfhull[i].size(); j++)
+							{
+								cv::circle(drawing, nfhull[i][j], 7, (0, 255, 255), 3, 8);
+							}
+						}
+						mHandsMat.push_back(drawing);
+					}
+
+				}
+			}
+
+		}
+	}
+	
 }
+
+void cv_testApp::keyDown(KeyEvent e){
+	if (e.getChar() == '1'){
+		displayMode = DEPTH;
+	}
+	else if (e.getChar() == '2'){
+		displayMode = VIDEO;
+	}
+}
+
 
 // Run application
 CINDER_APP_BASIC(cv_testApp, RendererGl)
