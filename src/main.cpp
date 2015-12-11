@@ -92,6 +92,8 @@ private:
 	bool								mInvertedPrev;
 	bool								mUserColor;
 	bool								mPrintGestureData;
+	std::string							mLabel;
+	int									mKvalue;
 
 	// Kinect
 	ci::Surface8u						mColorSurface;
@@ -154,7 +156,8 @@ private:
 	std::vector<double>						huMax;
 
 	// K-NN
-	std::string								kNN(int defect, Gesture gesture, int k=3);
+	std::string								kNN(int defect, Gesture gesture, int k);
+	std::vector<std::string>					gestureHistory;
 	
 };
 
@@ -307,6 +310,8 @@ void cv_testApp::setup()
 	displayMode = DEPTH;
 	mUserColor = false;
 	mPrintGestureData = false;
+	mLabel = "";
+	mKvalue = 3;
 
 
 	// Start image capture
@@ -347,7 +352,9 @@ void cv_testApp::setup()
 	mParams->addParam("Near mode", &mEnabledNearMode, "key=n");
 	mParams->addParam("Seated mode", &mEnabledSeatedMode, "key=e");
 	mParams->addParam("User color", &mUserColor, "key=u");
+	mParams->addParam("K value", &mKvalue);
 	mParams->addParam("Print gesture data", &mPrintGestureData, "key=p");
+	mParams->addParam("Gesture label", &mLabel, "");
 	mParams->addSeparator();
 	mParams->addText("APPLICATION");
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
@@ -377,7 +384,8 @@ void cv_testApp::setup()
 		for (int i = 0; i < 7; i++)
 			huMoments[i] = std::stod(data[i+2]);
 		Gesture gesture(huMoments, data[0]);
-		mGestures.resize(stoi(data[1]) + 1);
+		if (mGestures.size() <= (stoi(data[1])))
+			mGestures.resize(stoi(data[1]) + 1);
 		mGestures[stoi(data[1])].push_back(gesture);
 	}
 
@@ -609,7 +617,7 @@ void cv_testApp::update()
 						cv::Mat img_thresh, img_canny;
 						cv::threshold(handMat, img_thresh, hand_intensity + 3, 255, CV_THRESH_BINARY_INV);
 						cv::medianBlur(img_thresh, img_thresh, 3);
-						cv::GaussianBlur(img_thresh, img_thresh, cv::Size(3, 3), 2);
+						cv::GaussianBlur(img_thresh, img_thresh, cv::Size(3, 3), 5.0);
 
 						// Find contour
 						Canny(img_thresh, img_canny, 60, 110);
@@ -652,13 +660,6 @@ void cv_testApp::update()
 							cv::Moments mu;
 							mu = moments(contours[0], false);
 							cv::HuMoments(mu, hu);
-							if (mPrintGestureData){
-								for (int i = 0; i < 7; i++){
-									console() << hu[i] << " ";
-								}
-								//console() << endl;
-							}
-							
 						}
 
 						//draw Contours
@@ -694,14 +695,42 @@ void cv_testApp::update()
 						}
 
 						if (mPrintGestureData){
-							console() << defectCount << endl;
+							console() << mLabel << "," << defectCount << ",";
+							for (int i = 0; i < 7; i++){
+								console() << hu[i] << ",";
+							}
+							console() << endl;
 							mPrintGestureData = false;
 						}
 							
 						mHandsMat.push_back(drawing);
 						mHandPos.push_back(handPos3d);
 
-						cv::putText(drawing, kNN(defectCount, Gesture(hu, "unknown")), cv::Point(0, radius * 2), CV_FONT_HERSHEY_DUPLEX, 1, cv::Scalar(0, 0, 255));
+						string result = kNN(defectCount, Gesture(hu, "unknown"), mKvalue);
+
+						gestureHistory.push_back(result);
+						if (gestureHistory.size() > 30){
+							gestureHistory.erase(gestureHistory.begin());
+						}
+
+						// find history mode
+						map<string, int> count;
+						for (int i = 0; i < gestureHistory.size(); i++){
+							count[gestureHistory[i]]++;
+						}
+
+						int maxCount = -1;
+						string maxName;
+						for (map<string, int>::iterator it = count.begin(); it != count.end(); it++){
+							if (it->second > maxCount){
+								maxCount = it->second;
+								maxName = it->first;
+							}
+						}
+
+						cv::putText(drawing, maxName, cv::Point(0, radius * 2), CV_FONT_HERSHEY_DUPLEX, 1, cv::Scalar(0, 0, 255));
+
+
 						//console() << "Recognized Gesture: " <<  kNN(defectCount, Gesture(hu, "unknown")) << endl;
 					}
 
@@ -732,7 +761,7 @@ string cv_testApp::kNN(int defect, Gesture gesture,int k){
 	// find difference with every attributes
 	for (int i = 0; i < trainingData.size(); i++){
 		double sum = 0;
-		for (int j = 0; j < 7; j++){
+		for (int j = 0; j < 6; j++){
 			double diff = gesture.hu[j] - trainingData[i].hu[j];
 			diff /= (huMax[j] - huMin[j]);
 			sum += abs(diff);
