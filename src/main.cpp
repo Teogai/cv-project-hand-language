@@ -49,6 +49,8 @@
 #include "Kinect.h"
 
 #include "CinderOpenCv.h"
+#include <fstream>
+#include <algorithm>
 
 /*
 * This application explores the features of the Kinect SDK wrapper. It
@@ -130,7 +132,7 @@ private:
 	void								resetStats();
 
 	// Save screen shot
-	void								screenShot();
+	void								screenShot();	
 
 	//enum
 	enum mode{DEPTH, VIDEO} displayMode;
@@ -145,8 +147,15 @@ private:
 			this->name = name;
 		}
 	};
-
 	std::vector< std::vector<Gesture> >			mGestures;
+
+	// For min-max normalization
+	std::vector<double>						huMin;
+	std::vector<double>						huMax;
+
+	// K-NN
+	std::string								kNN(int defect, Gesture gesture);
+	
 };
 
 // Imports
@@ -346,7 +355,53 @@ void cv_testApp::setup()
 	mParams->addButton("Quit", bind(&cv_testApp::quit, this), "key=q");
 
 	// initialize gestureData
+	ifstream dataFile("train.csv");
 	
+	string line;
+	char *ptr;
+	int pos = 0;
+	// Init
+	huMin = vector<double>(7,999);
+	huMax = vector<double>(7,-999);
+	
+	while (getline(dataFile, line)){
+		vector<string> data;
+		while ((pos = line.find(",")) != std::string::npos){
+			string token = line.substr(0, pos);
+			data.push_back(token);
+			line.erase(0, pos + 1);
+		}
+		data.push_back(line);
+
+		vector<double> huMoments(7);
+		for (int i = 0; i < 7; i++)
+			huMoments[i] = std::stod(data[i+2]);
+		Gesture gesture(huMoments, data[0]);
+		mGestures.resize(stoi(data[1]) + 1);
+		mGestures[stoi(data[1])].push_back(gesture);
+	}
+
+	for (int i = 0; i < mGestures.size(); i++)
+	{		
+		for (int j = 0; j < mGestures[i].size(); j++)
+		{
+			for (int k = 0; k < 7; k++){
+				huMin[k] = fmin(huMin[k], mGestures[i][j].hu[k]);
+				huMax[k] = fmax(huMax[k], mGestures[i][j].hu[k]);
+			}
+		}
+	}
+
+	for (int i = 0; i < 7; i++){
+		console() << huMin[i] << " ";		
+	}
+	console() << endl;
+	for (int i = 0; i < 7; i++){
+		console() << huMax[i] << " ";
+	}
+	console() << endl;
+
+	dataFile.close();
 }
 
 // Quit
@@ -648,6 +703,7 @@ void cv_testApp::update()
 
 						if (mPrintGestureData){
 							console() << defectCount << endl;
+							mPrintGestureData = false;
 						}
 							
 						mHandsMat.push_back(drawing);
@@ -671,6 +727,9 @@ void cv_testApp::keyDown(KeyEvent e){
 	}
 }
 
+string cv_testApp::kNN(int defect, Gesture gesture){
+	return "";
+}
 
 // Run application
 CINDER_APP_BASIC(cv_testApp, RendererGl)
