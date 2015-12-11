@@ -523,10 +523,15 @@ void cv_testApp::update()
 						vector< vector<cv::Point> > hull(contours.size());
 						vector< vector<int> > hullI(contours.size());
 
+						vector< vector<Vec4i> > defects(contours.size());
+
 						for (size_t i = 0; i < contours.size(); i++)
 						{
 							cv::convexHull(contours[i], hull[i], false);
 							cv::convexHull(contours[i], hullI[i], false);
+							if (contours[i].size() > 3){
+								cv::convexityDefects(contours[i], hullI[i], defects[i]);
+							}
 						}
 
 						//draw Contours
@@ -538,6 +543,7 @@ void cv_testApp::update()
 							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
 						}
 
+						/*
 						// get hull points of fingertips
 						vector< vector<cv::Point> > fhull, finhull;
 						int fhullIndex = -1;
@@ -606,7 +612,10 @@ void cv_testApp::update()
 								cv::circle(drawing, nfhull[i][j], 7, (0, 255, 255), 3, 8);
 							}
 						}
+						*/
+						
 						mHandsMat.push_back(drawing);
+						
 					}
 
 				}
