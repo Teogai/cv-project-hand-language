@@ -504,10 +504,10 @@ void cv_testApp::update()
 						// Hand thresholding
 						double hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
 						
-						int rectTopLeftX = handPos2d.x - radius;
-						int rectTopLeftY = handPos2d.y - radius;
+						float rectTopLeftX = handPos2d.x - radius;
+						float rectTopLeftY = handPos2d.y - radius;
 
-						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2, radius * 2);
+						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2.0f, radius * 2.0f);
 						cv::Mat handMat = img_depth(handRect);
 
 						cv::Mat img_thresh, img_canny;
