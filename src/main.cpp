@@ -67,7 +67,6 @@ public:
 	void								update();
 	void								keyDown(ci::app::KeyEvent e);
 private:
-	
 
 	// Capturing flags
 	bool								mCapture;
@@ -90,6 +89,7 @@ private:
 	bool								mInverted;
 	bool								mInvertedPrev;
 	bool								mUserColor;
+	bool								mPrintGestureData;
 
 	// Kinect
 	ci::Surface8u						mColorSurface;
@@ -134,6 +134,19 @@ private:
 
 	//enum
 	enum mode{DEPTH, VIDEO} displayMode;
+
+	//data
+	struct Gesture{
+		std::vector<double> hu;
+		std::string name;
+
+		Gesture(std::vector<double> hu, std::string name){
+			this->hu = hu;
+			this->name = name;
+		}
+	};
+
+	std::vector< std::vector<Gesture> >			mGestures;
 };
 
 // Imports
@@ -284,6 +297,7 @@ void cv_testApp::setup()
 	mUserCount = 0;
 	displayMode = DEPTH;
 	mUserColor = false;
+	mPrintGestureData = false;
 
 
 	// Start image capture
@@ -324,11 +338,15 @@ void cv_testApp::setup()
 	mParams->addParam("Near mode", &mEnabledNearMode, "key=n");
 	mParams->addParam("Seated mode", &mEnabledSeatedMode, "key=e");
 	mParams->addParam("User color", &mUserColor, "key=u");
+	mParams->addParam("Print gesture data", &mPrintGestureData, "key=p");
 	mParams->addSeparator();
 	mParams->addText("APPLICATION");
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
 	mParams->addButton("Screen shot", bind(&cv_testApp::screenShot, this), "key=s");
 	mParams->addButton("Quit", bind(&cv_testApp::quit, this), "key=q");
+
+	// initialize gestureData
+	
 }
 
 // Quit
@@ -518,6 +536,8 @@ void cv_testApp::update()
 						int rectTopLeftX = handPos2d.x - radius;
 						int rectTopLeftY = handPos2d.y - radius;
 						/*
+
+						// Find min Depth
 						int minDepth = 191;
 
 						for (int i = (rectTopLeftX < 0) ? 0 : rectTopLeftX; 
@@ -551,6 +571,21 @@ void cv_testApp::update()
 						vector< vector<cv::Point> > contours;
 						cv::findContours(img_canny, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
 
+						// Filter contours (get only 1 contour)
+						if (contours.size() > 1){
+							int maxSize = 0;
+							int maxIndex = 0;
+							for (int i = 0; i < contours.size(); i++){
+								if (contours[i].size() > maxSize){
+									maxIndex = i;
+									maxSize = contours[i].size();
+								}
+							}
+							vector< vector<cv::Point> > tempContours;
+							tempContours.push_back(contours[maxIndex]);
+							contours = tempContours;
+						}
+
 						vector< vector<cv::Point> > hull(contours.size());
 						vector< vector<int> > hullI(contours.size());
 
@@ -565,6 +600,20 @@ void cv_testApp::update()
 							}
 						}
 
+						// Find hu moments
+						if (contours.size() == 1){
+							cv::Moments mu;
+							mu = moments(contours[0], false);
+							vector<double> hu(7);
+							cv::HuMoments(mu, hu);
+							if (mPrintGestureData){
+								for (int i = 0; i < 7; i++)
+									console() << hu[i] << " ";
+								//console() << endl;
+							}
+							
+						}
+
 						//draw Contours
 						cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
 						circle(drawing, cv::Point(radius, radius), 1, cv::Scalar(0, 0, 255), 2);
@@ -574,11 +623,11 @@ void cv_testApp::update()
 							cv::drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
 							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
 						}
-
 						
+						int defectCount = 0;
 						/// Draw convexityDefects
 						for (int i = 0; i < contours.size(); ++i)
-						{
+						{	
 							for (const cv::Vec4i& v : defects[i])
 							{
 								float depth = v[3] / 256;
@@ -592,82 +641,15 @@ void cv_testApp::update()
 									line(drawing, ptStart, ptFar, cv::Scalar(0, 255, 0), 1);
 									line(drawing, ptEnd, ptFar, cv::Scalar(0, 255, 0), 1);
 									circle(drawing, ptFar, 4, cv::Scalar(0, 255, 0), 2);
-									
-								}
-							}
-						}
-						
-						/*
-						// get hull points of fingertips
-						vector< vector<cv::Point> > fhull, finhull;
-						int fhullIndex = -1;
-						cv::Point p1, p2, hullP;
-						double th1, th2, th;
-
-						for (size_t i = 0; i < contours.size(); i++)
-						{
-							if (contours[i].size() < 50)
-							{
-								continue;
-							}
-							fhull.push_back(vector<cv::Point>());
-							finhull.push_back(vector<cv::Point>());
-							fhullIndex++;
-
-							for (size_t j = 0; j < hullI[i].size(); j++)
-							{
-								hullP = contours[i][hullI[i][j]];
-								p1 = contours[i][(hullI[i][j] - 16) % contours[i].size()];
-								p2 = contours[i][(hullI[i][j] + 16) % contours[i].size()];
-
-								th1 = abs(atan2(hullP.y - p1.y, hullP.x - p1.x) * 180 / CV_PI);
-								th2 = abs(atan2(hullP.y - p2.y, hullP.x - p2.x) * 180 / CV_PI);
-								th = abs(th1 - th2);
-								if (th < 40)
-								{
-									finhull[fhullIndex].push_back(hullP);
+									defectCount++;
 								}
 							}
 						}
 
-						// get exact fingertips
-						vector< vector<cv::Point> >nfhull;
-						int chullx, chully, add_flag = 1, nhullindex = -1;
-
-						for (size_t i = 0; i<finhull.size(); i++)
-						{
-							nfhull.push_back(vector<cv::Point>());
-							for (size_t j = 0; j < finhull[i].size(); j++)
-							{
-								chullx = finhull[i][j].x;
-								chully = finhull[i][j].y;
-								add_flag = 1;
-								for (size_t k = 0; k<nfhull[i].size(); k++)
-								{
-									if (nfhull[i][k].x > chullx - 15 && nfhull[i][k].x < chullx + 15
-										&& nfhull[i][k].y > chully - 15 && nfhull[i][k].y < chully + 15)
-									{
-										add_flag = 0;
-										break;
-									}
-								}
-								if (add_flag)
-								{
-									nfhull[i].push_back(cv::Point(chullx, chully));
-								}
-							}
+						if (mPrintGestureData){
+							console() << defectCount << endl;
 						}
-
-						// draw hull Points
-						for (size_t i = 0; i<nfhull.size(); i++)
-						{
-							for (size_t j = 0; j<nfhull[i].size(); j++)
-							{
-								cv::circle(drawing, nfhull[i][j], 7, (0, 255, 255), 3, 8);
-							}
-						}
-						*/
-						
+							
 						mHandsMat.push_back(drawing);
 						mHandPos.push_back(handPos3d);
 					}
