@@ -154,7 +154,7 @@ private:
 	std::vector<double>						huMax;
 
 	// K-NN
-	std::string								kNN(int defect, Gesture gesture);
+	std::string								kNN(int defect, Gesture gesture, int k=3);
 	
 };
 
@@ -390,16 +390,7 @@ void cv_testApp::setup()
 				huMax[k] = fmax(huMax[k], mGestures[i][j].hu[k]);
 			}
 		}
-	}
-
-	for (int i = 0; i < 7; i++){
-		console() << huMin[i] << " ";		
-	}
-	console() << endl;
-	for (int i = 0; i < 7; i++){
-		console() << huMax[i] << " ";
-	}
-	console() << endl;
+	}	
 
 	dataFile.close();
 }
@@ -655,15 +646,16 @@ void cv_testApp::update()
 							}
 						}
 
+						vector<double> hu(7);
 						// Find hu moments
 						if (contours.size() == 1){
 							cv::Moments mu;
 							mu = moments(contours[0], false);
-							vector<double> hu(7);
 							cv::HuMoments(mu, hu);
 							if (mPrintGestureData){
-								for (int i = 0; i < 7; i++)
+								for (int i = 0; i < 7; i++){
 									console() << hu[i] << " ";
+								}
 								//console() << endl;
 							}
 							
@@ -708,6 +700,9 @@ void cv_testApp::update()
 							
 						mHandsMat.push_back(drawing);
 						mHandPos.push_back(handPos3d);
+
+						cv::putText(drawing, kNN(defectCount, Gesture(hu, "unknown")), cv::Point(0, radius * 2), CV_FONT_HERSHEY_DUPLEX, 1, cv::Scalar(0, 0, 255));
+						//console() << "Recognized Gesture: " <<  kNN(defectCount, Gesture(hu, "unknown")) << endl;
 					}
 
 				}
@@ -727,8 +722,43 @@ void cv_testApp::keyDown(KeyEvent e){
 	}
 }
 
-string cv_testApp::kNN(int defect, Gesture gesture){
-	return "";
+string cv_testApp::kNN(int defect, Gesture gesture,int k){
+	if (defect >= mGestures.size())
+		return "Unknown";
+
+	vector<Gesture> trainingData = mGestures[defect];
+	vector<pair<double, string> > difference;
+
+	// find difference with every attributes
+	for (int i = 0; i < trainingData.size(); i++){
+		double sum = 0;
+		for (int j = 0; j < 7; j++){
+			double diff = gesture.hu[j] - trainingData[i].hu[j];
+			diff /= (huMax[j] - huMin[j]);
+			sum += abs(diff);
+		}
+		difference.push_back( make_pair(sum, trainingData[i].name) );
+	}
+
+	// sort
+	sort(difference.begin(), difference.end());
+
+	// find k nearest neighbor
+	map<string, int> count;
+	for (int i = 0; i < k; i++){
+		count[difference[i].second]++;
+	}
+
+	int maxCount = -1;
+	string maxName;
+	for (map<string, int>::iterator it = count.begin(); it != count.end(); it++){
+		if (it->second > maxCount){
+			maxCount = it->second;
+			maxName = it->first;
+		}
+	}
+
+	return maxName;
 }
 
 // Run application
