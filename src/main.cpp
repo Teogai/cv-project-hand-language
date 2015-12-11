@@ -89,6 +89,7 @@ private:
 	bool								mFlippedPrev;
 	bool								mInverted;
 	bool								mInvertedPrev;
+	bool								mUserColor;
 
 	// Kinect
 	ci::Surface8u						mColorSurface;
@@ -125,6 +126,7 @@ private:
 	ci::params::InterfaceGlRef			mParams;
 	bool								mRemoveBackground;
 	bool								mRemoveBackgroundPrev;
+	bool								mUserColorPrev;
 	void								resetStats();
 
 	// Save screen shot
@@ -281,6 +283,7 @@ void cv_testApp::setup()
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
 	displayMode = DEPTH;
+	mUserColor = false;
 
 
 	// Start image capture
@@ -320,6 +323,7 @@ void cv_testApp::setup()
 	mParams->addParam("Flip input", &mFlipped, "key=m");
 	mParams->addParam("Near mode", &mEnabledNearMode, "key=n");
 	mParams->addParam("Seated mode", &mEnabledSeatedMode, "key=e");
+	mParams->addParam("User color", &mUserColor, "key=u");
 	mParams->addSeparator();
 	mParams->addText("APPLICATION");
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
@@ -350,6 +354,7 @@ void cv_testApp::startKinect()
 	mDeviceOptions.enableSkeletonTracking(mEnabledSkeletons, mEnabledSeatedMode);
 	mDeviceOptions.enableColor(mEnabledColor);
 	mKinect->enableBinaryMode(mBinaryMode);
+	mKinect->enableUserColor(mUserColor);
 	mKinect->removeBackground(mRemoveBackground);
 	mKinect->setFlipped(mFlipped);
 
@@ -381,6 +386,12 @@ void cv_testApp::update()
 	// Toggle fullscreen
 	if (mFullScreen != isFullScreen()) {
 		setFullScreen(mFullScreen);
+	}
+
+	// Toggle User Color
+	if (mUserColor != mUserColorPrev) {
+		mKinect->enableUserColor(mUserColor);
+		mUserColorPrev = mUserColor;
 	}
 
 	// Toggle background remove
@@ -473,8 +484,9 @@ void cv_testApp::update()
 	mHandPos.clear();
 	mHandsMat.clear();
 	cv::Mat img_depth;
-	if (mDepthSurface)
+	if (mDepthSurface) {
 		img_depth = toOcv(Channel8u(mDepthSurface));
+	}
 
 	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt) {
 		vector<JointName> jointList;
@@ -492,7 +504,7 @@ void cv_testApp::update()
 
 				// Draw joint
 				Vec3f handPos3d(handPos2d, handDepth);
-				mHandPos.push_back(handPos3d);
+				
 				// get hands from depth surface
 				float radius = (1 / handDepth) * 40;
 				if (mDepthSurface){
@@ -502,17 +514,36 @@ void cv_testApp::update()
 						&& handPos2d.y < 240 - radius)
 					{
 						// Hand thresholding
-						double hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
+
+						int rectTopLeftX = handPos2d.x - radius;
+						int rectTopLeftY = handPos2d.y - radius;
+						/*
+						int minDepth = 191;
+
+						for (int i = (rectTopLeftX < 0) ? 0 : rectTopLeftX; 
+							i < rectTopLeftX + 2 * radius && i < 320; 
+							i++){
+							for (int j = (rectTopLeftY < 0) ? 0 : rectTopLeftY;
+								j < rectTopLeftY + 2 * radius && j < 240; 
+								j++){
+								int hand_intensity = img_depth.at<uchar>(j, i);
+								if (hand_intensity < minDepth) 
+									minDepth = hand_intensity;
+							}
+						}
 						
-						float rectTopLeftX = handPos2d.x - radius;
-						float rectTopLeftY = handPos2d.y - radius;
+						int hand_intensity = minDepth;
+						console() << hand_intensity << endl;
+						*/
+						int hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
 
 						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2.0f, radius * 2.0f);
 						cv::Mat handMat = img_depth(handRect);
 
 						cv::Mat img_thresh, img_canny;
-						cv::threshold(handMat, img_thresh, hand_intensity + 1, 255, CV_THRESH_BINARY_INV);
-						cv::medianBlur(img_thresh, img_thresh, 5);
+						cv::threshold(handMat, img_thresh, hand_intensity + 3, 255, CV_THRESH_BINARY_INV);
+						cv::medianBlur(img_thresh, img_thresh, 3);
+						cv::GaussianBlur(img_thresh, img_thresh, cv::Size(3, 3), 2);
 
 						// Find contour
 						Canny(img_thresh, img_canny, 60, 110);
@@ -523,7 +554,7 @@ void cv_testApp::update()
 						vector< vector<cv::Point> > hull(contours.size());
 						vector< vector<int> > hullI(contours.size());
 
-						vector< vector<Vec4i> > defects(contours.size());
+						vector< vector<cv::Vec4i> > defects(contours.size());
 
 						for (size_t i = 0; i < contours.size(); i++)
 						{
@@ -536,6 +567,7 @@ void cv_testApp::update()
 
 						//draw Contours
 						cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
+						circle(drawing, cv::Point(radius, radius), 1, cv::Scalar(0, 0, 255), 2);
 						for (size_t i = 0; i < contours.size(); i++)
 						{
 							cv::Scalar color = cv::Scalar(255, 255, 255);
@@ -543,6 +575,28 @@ void cv_testApp::update()
 							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
 						}
 
+						
+						/// Draw convexityDefects
+						for (int i = 0; i < contours.size(); ++i)
+						{
+							for (const cv::Vec4i& v : defects[i])
+							{
+								float depth = v[3] / 256;
+								if (depth > 10) //  filter defects by depth, e.g more than 10
+								{
+									int startidx = v[0]; cv::Point ptStart(contours[i][startidx]);
+									int endidx = v[1]; cv::Point ptEnd(contours[i][endidx]);
+									int faridx = v[2]; cv::Point ptFar(contours[i][faridx]);
+
+									line(drawing, ptStart, ptEnd, cv::Scalar(0, 255, 0), 1);
+									line(drawing, ptStart, ptFar, cv::Scalar(0, 255, 0), 1);
+									line(drawing, ptEnd, ptFar, cv::Scalar(0, 255, 0), 1);
+									circle(drawing, ptFar, 4, cv::Scalar(0, 255, 0), 2);
+									
+								}
+							}
+						}
+						
 						/*
 						// get hull points of fingertips
 						vector< vector<cv::Point> > fhull, finhull;
@@ -615,7 +669,7 @@ void cv_testApp::update()
 						*/
 						
 						mHandsMat.push_back(drawing);
-						
+						mHandPos.push_back(handPos3d);
 					}
 
 				}
