@@ -157,7 +157,8 @@ private:
 
 	// K-NN
 	std::string								kNN(int defect, Gesture gesture, int k);
-	std::vector<std::string>					gestureHistory;
+	// Keeping histories of each detected joint
+	std::map<size_t,std::vector<std::string> >					gestureHistory;
 	
 };
 
@@ -708,15 +709,15 @@ void cv_testApp::update()
 
 						string result = kNN(defectCount, Gesture(hu, "unknown"), mKvalue);
 
-						gestureHistory.push_back(result);
-						if (gestureHistory.size() > 30){
-							gestureHistory.erase(gestureHistory.begin());
+						gestureHistory[m].push_back(result);
+						if (gestureHistory[m].size() > 30){
+							gestureHistory[m].erase(gestureHistory[m].begin());
 						}
 
 						// find history mode
 						map<string, int> count;
-						for (int i = 0; i < gestureHistory.size(); i++){
-							count[gestureHistory[i]]++;
+						for (int i = 0; i < gestureHistory[m].size(); i++){
+							count[gestureHistory[m][i]]++;
 						}
 
 						int maxCount = -1;
