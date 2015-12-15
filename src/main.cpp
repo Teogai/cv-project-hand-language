@@ -46,6 +46,7 @@
 #include "cinder/params/Params.h"
 #include "cinder/Vector.h"
 #include "cinder/Utilities.h"
+#include "cinder/Text.h"
 #include "Kinect.h"
 
 #include "CinderOpenCv.h"
@@ -94,6 +95,7 @@ private:
 	bool								mPrintGestureData;
 	std::string							mLabel;
 	int									mKvalue;
+	bool								mDebug;
 
 	// Kinect
 	ci::Surface8u						mColorSurface;
@@ -158,8 +160,10 @@ private:
 	// K-NN
 	std::string								kNN(int defect, Gesture gesture, int k);
 	// Keeping histories of each detected joint
-	std::map<size_t,std::vector<std::string> >					gestureHistory;
-	
+	std::vector<std::string>				gestureHistory;
+	std::string								subTitle;
+	std::string								lastSubTitle;
+
 };
 
 // Imports
@@ -178,36 +182,53 @@ void cv_testApp::draw()
 	// We're capturing
 	if (mKinect->isCapturing()) {
 		// Switch to 2D
-		gl::pushMatrices();
 		gl::setMatricesWindow(getWindowSize(), true);
-		gl::scale(Vec2f::one() * 3);
-		
+
+
 		// Draw depth and color textures
 		//Rectf destRect(0, 0, KINECT_WIDTH, KINECT_HEIGHT);
 
-		switch (displayMode)
+		if (mDebug)
 		{
-		case cv_testApp::DEPTH:
-			//Area srcArea(0, 0, mDepthSurface.getWidth(), mDepthSurface.getHeight());
+			gl::pushMatrices();
+			gl::scale(Vec2f::one() * 3);
 			if (mDepthSurface)
 				gl::draw(gl::Texture(mDepthSurface));
 			if (!mHandsMat.empty()){
-				for (size_t i = 0; i < mHandsMat.size(); i++){
-					gl::pushMatrices();
+				for (size_t i = 0; i < mHandsMat.size(); i++){					
 					gl::translate(mHandPos[i].xy() - (Vec2f::one() * (1 / mHandPos[i].z) * 40));
-					gl::draw(gl::Texture(fromOcv(mHandsMat[i])));
-					gl::popMatrices();
+					gl::draw(gl::Texture(fromOcv(mHandsMat[i])));					
 				}
 			}
-			break;
-		case cv_testApp::VIDEO:
-			//Area srcArea(0, 0, mColorSurface.getWidth(), mColorSurface.getHeight());
-			
-			gl::draw(gl::Texture(mColorSurface));
-			break;
-		default:
-			break;
+			gl::popMatrices();
 		}
+		else{
+			if (mColorSurface){
+				gl::pushMatrices();
+				gl::scale(Vec2f::one() * 3);
+				gl::scale(Vec2f(0.5f, 0.5f));
+				gl::draw(gl::Texture(mColorSurface));
+				gl::popMatrices();
+			}		
+
+			if (subTitle != ""){
+				gl::enableAlphaBlending();
+				TextBox tbox = TextBox().alignment(TextBox::CENTER).font(Font("TAHOMA", 80.0f)).size(Vec2i(getWindowWidth(), getWindowHeight() / 4)).text(subTitle);
+				tbox.setColor(Color(1.0f, 1.0f, 1.0f));
+				tbox.setBackgroundColor(ColorA(0, 0, 0, 0));
+				// Shadow is drawn first
+				gl::color(0, 0, 0);
+				gl::draw(gl::Texture::create(tbox.render()), Vec2i(3, 3 + 3 * getWindowHeight() / 4));
+				gl::color(1, 1, 1);
+				// Then real text
+				gl::draw(gl::Texture::create(tbox.render()), Vec2i(0, 3 * getWindowHeight() / 4));
+				
+				//gl::drawStringCentered(subTitle, Vec2f(getWindowWidth()/2, getWindowHeight()) / 4, ColorA(1, 1, 1, 1), Font("TAHOMA", 40.0f));
+				gl::disableAlphaBlending();
+				
+			}
+		}
+	
 		
 		// Set up camera for 3D
 		//gl::setMatrices(mCamera);
@@ -220,8 +241,6 @@ void cv_testApp::draw()
 		//	gl::drawStrokedCircle(mHandPos[i].xy(), (1 / mHandPos[i].z)*40, 16);
 		//}	
 		//gl::color(1, 1, 1);
-
-		gl::popMatrices();
 	}
 
 	// Draw the interface
@@ -308,11 +327,13 @@ void cv_testApp::setup()
 	mRemoveBackground = true;
 	mRemoveBackgroundPrev = mRemoveBackground;
 	mUserCount = 0;
-	displayMode = DEPTH;
+	displayMode = VIDEO;
 	mUserColor = false;
 	mPrintGestureData = false;
 	mLabel = "";
-	mKvalue = 3;
+	mKvalue = 5;
+	mDebug = false;
+	subTitle = "";
 
 
 	// Start image capture
@@ -341,9 +362,10 @@ void cv_testApp::setup()
 	mParams->addSeparator();
 	mParams->addText("CAPTURE");
 	mParams->addParam("Capture", &mCapture, "key=c");
-	mParams->addParam("Depth", &mEnabledDepth, "key=d");
+	mParams->addParam("Depth", &mEnabledDepth);
 	mParams->addParam("Skeletons", &mEnabledSkeletons, "key=k");
 	mParams->addParam("Color", &mEnabledColor, "key=v");
+	mParams->addParam("Debug Mode", &mDebug, "key=d");
 	mParams->addSeparator();
 	mParams->addText("INPUT");
 	mParams->addParam("Remove background", &mRemoveBackground, "key=b");
@@ -361,6 +383,7 @@ void cv_testApp::setup()
 	mParams->addParam("Full screen", &mFullScreen, "key=f");
 	mParams->addButton("Screen shot", bind(&cv_testApp::screenShot, this), "key=s");
 	mParams->addButton("Quit", bind(&cv_testApp::quit, this), "key=q");
+	
 
 	// initialize gestureData
 	ifstream dataFile("train.csv");
@@ -561,183 +584,186 @@ void cv_testApp::update()
 		img_depth = toOcv(Channel8u(mDepthSurface));
 	}
 
-	for (vector<Skeleton>::const_iterator skeletonIt = mSkeletons.cbegin(); skeletonIt != mSkeletons.cend(); ++skeletonIt) {
+	if (!mSkeletons.empty()){
+		vector<Skeleton>::iterator skeletonIt = mSkeletons.begin();
+		while (skeletonIt->empty()){
+			skeletonIt++;
+			if (skeletonIt == mSkeletons.end()){
+				subTitle = "";
+				gestureHistory.clear();
+				return;
+			}
+		}
 		vector<JointName> jointList;
-		jointList.push_back(NUI_SKELETON_POSITION_HAND_LEFT);
-		jointList.push_back(NUI_SKELETON_POSITION_HAND_RIGHT);
 
-		// Draw bones and joints
-		for (size_t m = 0; m < jointList.size(); m++) {
+		// Get left and righthands
+		if (!skeletonIt->empty()){
+			const Bone& righthand = skeletonIt->at(NUI_SKELETON_POSITION_HAND_RIGHT);
+			Vec2f handPos2d = mKinect->getSkeletonDepthPos(righthand.getPosition());
+			float handDepth = righthand.getPosition().z;
 
-			// Get positions of each hand in this bone to draw it
-			if (!skeletonIt->empty()){
-				const Bone& bone = skeletonIt->at(jointList[m]);
-				Vec2f handPos2d = mKinect->getSkeletonDepthPos(bone.getPosition());
-				float handDepth = bone.getPosition().z;
+			const Bone& lefthand = skeletonIt->at(NUI_SKELETON_POSITION_HAND_LEFT);
+			Vec2f lefthandPos2d = mKinect->getSkeletonDepthPos(lefthand.getPosition());
+			float lefthandDepth = lefthand.getPosition().z;
 
-				// Draw joint
-				Vec3f handPos3d(handPos2d, handDepth);
-				
-				// get hands from depth surface
-				float radius = (1 / handDepth) * 40;
-				if (mDepthSurface){
-					if (handPos2d.x > radius
-						&& handPos2d.x < 320 - radius
-						&& handPos2d.y > radius
-						&& handPos2d.y < 240 - radius)
-					{
-						// Hand thresholding
-
-						int rectTopLeftX = handPos2d.x - radius;
-						int rectTopLeftY = handPos2d.y - radius;
-						/*
-
-						// Find min Depth
-						int minDepth = 191;
-
-						for (int i = (rectTopLeftX < 0) ? 0 : rectTopLeftX; 
-							i < rectTopLeftX + 2 * radius && i < 320; 
-							i++){
-							for (int j = (rectTopLeftY < 0) ? 0 : rectTopLeftY;
-								j < rectTopLeftY + 2 * radius && j < 240; 
-								j++){
-								int hand_intensity = img_depth.at<uchar>(j, i);
-								if (hand_intensity < minDepth) 
-									minDepth = hand_intensity;
-							}
-						}
-						
-						int hand_intensity = minDepth;
-						console() << hand_intensity << endl;
-						*/
-						int hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
-
-						cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2.0f, radius * 2.0f);
-						cv::Mat handMat = img_depth(handRect);
-
-						cv::Mat img_thresh, img_canny;
-						cv::threshold(handMat, img_thresh, hand_intensity + 3, 255, CV_THRESH_BINARY_INV);
-						cv::medianBlur(img_thresh, img_thresh, 3);
-						cv::GaussianBlur(img_thresh, img_thresh, cv::Size(3, 3), 5.0);
-
-						// Find contour
-						Canny(img_thresh, img_canny, 60, 110);
-
-						vector< vector<cv::Point> > contours;
-						cv::findContours(img_canny, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
-
-						// Filter contours (get only 1 contour)
-						if (contours.size() > 1){
-							int maxSize = 0;
-							int maxIndex = 0;
-							for (int i = 0; i < contours.size(); i++){
-								if (contours[i].size() > maxSize){
-									maxIndex = i;
-									maxSize = contours[i].size();
-								}
-							}
-							vector< vector<cv::Point> > tempContours;
-							tempContours.push_back(contours[maxIndex]);
-							contours = tempContours;
-						}
-
-						vector< vector<cv::Point> > hull(contours.size());
-						vector< vector<int> > hullI(contours.size());
-
-						vector< vector<cv::Vec4i> > defects(contours.size());
-
-						for (size_t i = 0; i < contours.size(); i++)
-						{
-							cv::convexHull(contours[i], hull[i], false);
-							cv::convexHull(contours[i], hullI[i], false);
-							if (contours[i].size() > 3){
-								cv::convexityDefects(contours[i], hullI[i], defects[i]);
-							}
-						}
-
-						vector<double> hu(7);
-						// Find hu moments
-						if (contours.size() == 1){
-							cv::Moments mu;
-							mu = moments(contours[0], false);
-							cv::HuMoments(mu, hu);
-						}
-
-						//draw Contours
-						cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
-						circle(drawing, cv::Point(radius, radius), 1, cv::Scalar(0, 0, 255), 2);
-						for (size_t i = 0; i < contours.size(); i++)
-						{
-							cv::Scalar color = cv::Scalar(255, 255, 255);
-							cv::drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
-							cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
-						}
-						
-						int defectCount = 0;
-						/// Draw convexityDefects
-						for (int i = 0; i < contours.size(); ++i)
-						{	
-							for (const cv::Vec4i& v : defects[i])
-							{
-								float depth = v[3] / 256;
-								if (depth > 10) //  filter defects by depth, e.g more than 10
-								{
-									int startidx = v[0]; cv::Point ptStart(contours[i][startidx]);
-									int endidx = v[1]; cv::Point ptEnd(contours[i][endidx]);
-									int faridx = v[2]; cv::Point ptFar(contours[i][faridx]);
-
-									line(drawing, ptStart, ptEnd, cv::Scalar(0, 255, 0), 1);
-									line(drawing, ptStart, ptFar, cv::Scalar(0, 255, 0), 1);
-									line(drawing, ptEnd, ptFar, cv::Scalar(0, 255, 0), 1);
-									circle(drawing, ptFar, 4, cv::Scalar(0, 255, 0), 2);
-									defectCount++;
-								}
-							}
-						}
-
-						if (mPrintGestureData){
-							console() << mLabel << "," << defectCount << ",";
-							for (int i = 0; i < 7; i++){
-								console() << hu[i] << ",";
-							}
-							console() << endl;
-							mPrintGestureData = false;
-						}
-							
-						mHandsMat.push_back(drawing);
-						mHandPos.push_back(handPos3d);
-
-						string result = kNN(defectCount, Gesture(hu, "unknown"), mKvalue);
-
-						gestureHistory[m].push_back(result);
-						if (gestureHistory[m].size() > 30){
-							gestureHistory[m].erase(gestureHistory[m].begin());
-						}
-
-						// find history mode
-						map<string, int> count;
-						for (int i = 0; i < gestureHistory[m].size(); i++){
-							count[gestureHistory[m][i]]++;
-						}
-
-						int maxCount = -1;
-						string maxName;
-						for (map<string, int>::iterator it = count.begin(); it != count.end(); it++){
-							if (it->second > maxCount){
-								maxCount = it->second;
-								maxName = it->first;
-							}
-						}
-
-						cv::putText(drawing, maxName, cv::Point(0, radius * 2), CV_FONT_HERSHEY_DUPLEX, 1, cv::Scalar(0, 0, 255));
-
-
-						//console() << "Recognized Gesture: " <<  kNN(defectCount, Gesture(hu, "unknown")) << endl;
-					}
-
-				}
+			// 2hands together to end
+			if (lefthandPos2d.distance(handPos2d) < 50){
+				subTitle = "";
+				gestureHistory.clear();
+				return;
 			}
 
+			// hand pos with depth
+			Vec3f handPos3d(handPos2d, handDepth);
+				
+			// get hands from depth surface
+			float radius = (1 / handDepth) * 40;
+			if (mDepthSurface){
+				if (handPos2d.x > radius
+					&& handPos2d.x < 320 - radius
+					&& handPos2d.y > radius
+					&& handPos2d.y < 240 - radius)
+				{
+					// Hand thresholding
+
+					int rectTopLeftX = handPos2d.x - radius;
+					int rectTopLeftY = handPos2d.y - radius;
+
+					int hand_intensity = img_depth.at<uchar>(handPos2d.y, handPos2d.x);
+
+					cv::Rect handRect(rectTopLeftX, rectTopLeftY, radius * 2.0f, radius * 2.0f);
+					cv::Mat handMat = img_depth(handRect);
+
+					cv::Mat img_thresh, img_canny;
+					cv::threshold(handMat, img_thresh, hand_intensity + 3, 255, CV_THRESH_BINARY_INV);
+					cv::medianBlur(img_thresh, img_thresh, 3);
+					cv::GaussianBlur(img_thresh, img_thresh, cv::Size(3, 3), 5.0);
+
+					// Find contour
+					Canny(img_thresh, img_canny, 60, 110);
+
+					vector< vector<cv::Point> > contours;
+					cv::findContours(img_canny, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+
+					// Filter contours (get only 1 contour)
+					if (contours.size() > 1){
+						int maxSize = 0;
+						int maxIndex = 0;
+						for (int i = 0; i < contours.size(); i++){
+							if (contours[i].size() > maxSize){
+								maxIndex = i;
+								maxSize = contours[i].size();
+							}
+						}
+						vector< vector<cv::Point> > tempContours;
+						tempContours.push_back(contours[maxIndex]);
+						contours = tempContours;
+					}
+
+					vector< vector<cv::Point> > hull(contours.size());
+					vector< vector<int> > hullI(contours.size());
+
+					vector< vector<cv::Vec4i> > defects(contours.size());
+
+					for (size_t i = 0; i < contours.size(); i++)
+					{
+						cv::convexHull(contours[i], hull[i], false);
+						cv::convexHull(contours[i], hullI[i], false);
+						if (contours[i].size() > 3){
+							cv::convexityDefects(contours[i], hullI[i], defects[i]);
+						}
+					}
+
+					vector<double> hu(7);
+					// Find hu moments
+					if (contours.size() == 1){
+						cv::Moments mu;
+						mu = moments(contours[0], false);
+						cv::HuMoments(mu, hu);
+					}
+
+					//draw Contours
+					cv::Mat drawing = cv::Mat::zeros(img_thresh.size(), CV_8UC3);
+					circle(drawing, cv::Point(radius, radius), 1, cv::Scalar(0, 0, 255), 2);
+					for (size_t i = 0; i < contours.size(); i++)
+					{
+						cv::Scalar color = cv::Scalar(255, 255, 255);
+						cv::drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+						cv::drawContours(drawing, hull, i, color, 1, 8, vector<Vec4i>(), 0, cv::Point());
+					}
+						
+					int defectCount = 0;
+					/// Draw convexityDefects
+					for (int i = 0; i < contours.size(); ++i)
+					{	
+						for (const cv::Vec4i& v : defects[i])
+						{
+							float depth = v[3] / 256;
+							if (depth > 10) //  filter defects by depth, e.g more than 10
+							{
+								int startidx = v[0]; cv::Point ptStart(contours[i][startidx]);
+								int endidx = v[1]; cv::Point ptEnd(contours[i][endidx]);
+								int faridx = v[2]; cv::Point ptFar(contours[i][faridx]);
+
+								line(drawing, ptStart, ptEnd, cv::Scalar(0, 255, 0), 1);
+								line(drawing, ptStart, ptFar, cv::Scalar(0, 255, 0), 1);
+								line(drawing, ptEnd, ptFar, cv::Scalar(0, 255, 0), 1);
+								circle(drawing, ptFar, 4, cv::Scalar(0, 255, 0), 2);
+								defectCount++;
+							}
+						}
+					}
+
+					if (mPrintGestureData){
+						console() << mLabel << "," << defectCount << ",";
+						for (int i = 0; i < 7; i++){
+							console() << hu[i] << ",";
+						}
+						console() << endl;
+						mPrintGestureData = false;
+					}
+							
+					mHandsMat.push_back(drawing);
+					mHandPos.push_back(handPos3d);
+
+					string result = kNN(defectCount, Gesture(hu, "unknown"), mKvalue);
+
+					gestureHistory.push_back(result);
+					if (gestureHistory.size() > 60){
+						gestureHistory.erase(gestureHistory.begin());
+					}
+					else{
+						return;
+					}
+
+					// find history mode
+					map<string, int> count;
+					for (int i = 0; i < gestureHistory.size(); i++){
+						count[gestureHistory[i]]++;
+					}
+
+					int maxCount = -1;
+					string maxName;
+					for (map<string, int>::iterator it = count.begin(); it != count.end(); it++){
+						if (it->second > maxCount){
+							maxCount = it->second;
+							maxName = it->first;
+						}
+					}
+
+					cv::putText(drawing, maxName, cv::Point(0, radius * 2), CV_FONT_HERSHEY_DUPLEX, 1, cv::Scalar(0, 0, 255));
+					if (subTitle == ""){
+						subTitle = maxName;
+					}
+					else if (lastSubTitle != maxName) {
+						subTitle += " " + maxName;
+					}
+					lastSubTitle = maxName;
+
+					//console() << "Recognized Gesture: " <<  kNN(defectCount, Gesture(hu, "unknown")) << endl;
+				}
+
+			}
 		}
 	}
 	
@@ -754,7 +780,7 @@ void cv_testApp::keyDown(KeyEvent e){
 
 string cv_testApp::kNN(int defect, Gesture gesture,int k){
 	if (defect >= mGestures.size())
-		return "Unknown";
+		return "";
 
 	vector<Gesture> trainingData = mGestures[defect];
 	vector<pair<double, string> > difference;
@@ -762,7 +788,7 @@ string cv_testApp::kNN(int defect, Gesture gesture,int k){
 	// find difference with every attributes
 	for (int i = 0; i < trainingData.size(); i++){
 		double sum = 0;
-		for (int j = 0; j < 6; j++){
+		for (int j = 0; j < 7; j++){
 			double diff = gesture.hu[j] - trainingData[i].hu[j];
 			diff /= (huMax[j] - huMin[j]);
 			sum += abs(diff);
@@ -773,11 +799,19 @@ string cv_testApp::kNN(int defect, Gesture gesture,int k){
 	// sort
 	sort(difference.begin(), difference.end());
 
+	//thresholding
+	//console() << difference[k - 1].first << endl;
+	if (difference[k - 1].first > 0.9){
+		return "";
+	}
+
 	// find k nearest neighbor
 	map<string, int> count;
 	for (int i = 0; i < k; i++){
 		count[difference[i].second]++;
 	}
+
+	
 
 	int maxCount = -1;
 	string maxName;
