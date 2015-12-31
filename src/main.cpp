@@ -244,7 +244,7 @@ void cv_testApp::draw()
 	}
 
 	// Draw the interface
-	mParams->draw();
+	// mParams->draw();
 }
 
 // Receives color data
